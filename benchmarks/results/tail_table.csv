@@ -1,0 +1,22 @@
+case,model,lambda_L,lambda_U,lambda_L_true,lambda_U_true
+asset_panel_5d,NeuroCopula,0.318,0.28,,
+asset_panel_5d,Vine (elliptical),0.482,0.474,,
+asset_panel_5d,Vine (parametric),0.482,0.474,,
+clayton_theta2,NeuroCopula,0.724,0.047,0.7071067811865476,0.0
+clayton_theta2,Vine (elliptical),0.4,0.411,0.7071067811865476,0.0
+clayton_theta2,Vine (parametric),0.711,0.06,0.7071067811865476,0.0
+gaussian_rho0.7,NeuroCopula,0.286,0.331,0.0,0.0
+gaussian_rho0.7,Vine (elliptical),0.309,0.322,0.0,0.0
+gaussian_rho0.7,Vine (parametric),0.309,0.322,0.0,0.0
+gumbel_theta2,NeuroCopula,0.191,0.61,0.0,0.5857864376269049
+gumbel_theta2,Vine (elliptical),0.383,0.394,0.0,0.5857864376269049
+gumbel_theta2,Vine (parametric),0.189,0.591,0.0,0.5857864376269049
+mixed_regime,NeuroCopula,0.586,0.617,,
+mixed_regime,Vine (elliptical),0.29,0.295,,
+mixed_regime,Vine (parametric),0.29,0.295,,
+mixed_regime_5d,NeuroCopula,0.377,0.411,,
+mixed_regime_5d,Vine (elliptical),0.274,0.265,,
+mixed_regime_5d,Vine (parametric),0.275,0.265,,
+t_copula_df4,NeuroCopula,0.444,0.46,0.3906840165496298,0.3906840165496298
+t_copula_df4,Vine (elliptical),0.437,0.445,0.3906840165496298,0.3906840165496298
+t_copula_df4,Vine (parametric),0.437,0.445,0.3906840165496298,0.3906840165496298

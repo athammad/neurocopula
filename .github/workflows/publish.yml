@@ -1,0 +1,26 @@
+name: Publish to PyPI
+
+# Publishing is manual and tag-driven on purpose: a release should be a
+# deliberate act, not a side effect of a merge.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Trusted publishing: no long-lived API token needs to live in secrets.
+      # Configure the publisher once at https://pypi.org/manage/account/publishing/
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.env
+.envrc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+.ipynb_checkpoints/
+.DS_Store
+*.pt
+# Benchmark results ARE committed: they are the evidence behind the README's
+# numbers, and they let a reader check the claims without a 20-minute rerun.
+docs/img/*.png
+!docs/img/.gitkeep
+
+# The original single-file prototypes this library was built from. Kept on
+# disk for reference, but not part of the published package.
+legacy/
+
+# pyenv local environment name: machine-specific.
+.python-version
