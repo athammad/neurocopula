@@ -241,8 +241,53 @@ class SeasonalLayers:
         return pd.Series(out, name="probability").sort_index()
 
     # -----------------------------------------------------------------
-    def save(self, directory, netcdf: bool = True, **kwargs) -> dict:
-        """Save every stratum under `directory`, one bundle (and NetCDF) each."""
+    def to_dataset(self, precompute=None, n: int = 20_000):
+        """
+        Every stratum in **one** `xarray.Dataset`, with the stratum as a
+        dimension.
+
+        A NetCDF takes arbitrary dimensions, so there is no reason to split
+        strata across files: they share a grid, and a single file is one thing
+        to hand over, opens with ``.sel(season="DJF")``, and lets a reader
+        difference two seasons without merging anything first.
+
+        precompute: ``{field_name: conditions}`` evaluated for every stratum and
+            stored as a (stratum, lat, lon) field.
+        """
+        import xarray as xr
+
+        from .io import layer_to_dataset
+
+        dim = "season" if self.by == "season" else ("month" if self.by == "month"
+                                                    else "stratum")
+        keys = self.keys
+        parts = [layer_to_dataset(self.layers[k], precompute=precompute, n=n)
+                 for k in keys]
+        ds = xr.concat(parts, dim=dim)
+        ds = ds.assign_coords({dim: keys})
+        ds[dim].attrs["description"] = f"stratum ({self.by}); layers fitted independently"
+        ds["n_days"] = (dim, [self.n_days_.get(k, 0) for k in keys])
+        ds["n_days"].attrs["description"] = "observations used to fit this stratum"
+        ds.attrs["stratified_by"] = self.by
+        if self.period:
+            ds.attrs["period"] = f"{self.period[0]}-{self.period[1]}"
+            ds.attrs["period_note"] = (
+                "fitted over a fixed window; the layer describes that period's "
+                "climate, not a trend across the full record"
+            )
+        return ds
+
+    def save(self, directory, netcdf: bool = True, single_netcdf: bool = True,
+             precompute=None, n: int = 20_000, **kwargs) -> dict:
+        """
+        Save the strata under `directory`.
+
+        Each stratum's fitted model goes to its own bundle, since those hold
+        live objects. The NetCDF side is written as a **single** file spanning
+        every stratum unless `single_netcdf` is False -- that is the artifact a
+        reader actually opens, and splitting it gains nothing.
+        """
+        import json
         from pathlib import Path
 
         from .io import save_layer
@@ -252,10 +297,15 @@ class SeasonalLayers:
         paths = {}
         for key, lay in self.layers.items():
             paths[key] = save_layer(lay, directory / f"{self.by}_{key}",
-                                    netcdf=netcdf, **kwargs)
+                                    netcdf=netcdf and not single_netcdf,
+                                    precompute=precompute, n=n, **kwargs)
+        if netcdf and single_netcdf:
+            combined = directory / "layer.nc"
+            self.to_dataset(precompute=precompute, n=n).to_netcdf(combined)
+            paths["netcdf"] = combined
+
         meta = {"by": self.by, "period": self.period, "n_days": self.n_days_,
                 "keys": list(self.layers)}
-        import json
         (directory / "strata.json").write_text(json.dumps(meta, indent=2, default=str))
         return paths
 

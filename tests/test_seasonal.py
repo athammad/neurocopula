@@ -175,6 +175,64 @@ class TestQuerying:
         assert any(c.endswith("_range_km") for c in s.columns)
 
 
+class TestSingleFileExport:
+    """
+    Strata share a grid, so they belong in one NetCDF with the stratum as a
+    dimension. Splitting them across files gains nothing and forces a reader to
+    merge before comparing two seasons.
+    """
+
+    def test_one_dataset_spans_every_stratum(self, seasonal):
+        ds = seasonal.to_dataset()
+        assert "season" in ds.sizes
+        assert ds.sizes["season"] == 4
+        assert set(ds.season.values.tolist()) == set(SEASONS)
+
+    def test_dataset_keeps_the_shared_grid(self, seasonal):
+        ds = seasonal.to_dataset()
+        assert {"lat", "lon", "variable"} <= set(ds.sizes)
+
+    def test_dataset_records_rows_per_stratum(self, seasonal):
+        ds = seasonal.to_dataset()
+        assert "n_days" in ds.data_vars
+        assert int(ds.n_days.sum()) == sum(seasonal.n_days_.values())
+
+    def test_precomputed_field_gains_the_stratum_dimension(self, seasonal):
+        ds = seasonal.to_dataset(precompute={"c": {"rain": (">", 15.0)}}, n=600)
+        assert ds.c.dims[0] == "season"
+        assert ds.c.shape[0] == 4
+
+    def test_selecting_a_season_works(self, seasonal):
+        ds = seasonal.to_dataset(precompute={"c": {"rain": (">", 15.0)}}, n=600)
+        djf = ds.c.sel(season="DJF")
+        assert "season" not in djf.dims
+        assert float(djf.min()) >= 0.0 and float(djf.max()) <= 1.0
+
+    def test_period_recorded_in_attrs(self, seasonal):
+        ds = seasonal.to_dataset()
+        assert ds.attrs["stratified_by"] == "season"
+        assert ds.attrs["period"] == "1991-2020"
+
+    def test_save_writes_one_netcdf_not_four(self, seasonal, tmp_path):
+        seasonal.save(tmp_path / "out", n=400)
+        ncs = sorted((tmp_path / "out").glob("*.nc"))
+        assert len(ncs) == 1 and ncs[0].name == "layer.nc"
+        # One bundle per stratum, since those hold live model objects.
+        assert len(list((tmp_path / "out").glob("*.pt"))) == 4
+
+    def test_split_netcdf_still_available(self, seasonal, tmp_path):
+        seasonal.save(tmp_path / "split", single_netcdf=False, n=400)
+        assert len(list((tmp_path / "split").glob("*.nc"))) == 4
+
+    def test_month_stratification_uses_a_month_dimension(self, dated_data, coords):
+        data, dates = dated_data
+        sl = SeasonalLayers.fit(
+            data, coords, dates, variables=["rain", "temp"], by="month",
+            period=(2016, 2020), verbose=False, **FAST, **FIT)
+        ds = sl.to_dataset()
+        assert "month" in ds.sizes and ds.sizes["month"] == 12
+
+
 class TestPersistence:
     def test_round_trip(self, seasonal, tmp_path):
         seasonal.save(tmp_path / "strata", netcdf=False)
