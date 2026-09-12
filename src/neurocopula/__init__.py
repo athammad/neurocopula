@@ -25,24 +25,42 @@ Quick start::
 The comparison baseline, `VineCopula`, needs the optional `pyvinecopulib`
 dependency and is imported lazily -- ``from neurocopula import VineCopula``
 raises a clear install message if it is missing.
+
+For gridded data, `SpatialProbabilisticLayer` combines a per-location copula
+with a spatial dependence model, so that a region selected *after* fitting can
+be queried jointly::
+
+    from neurocopula import SpatialProbabilisticLayer
+
+    layer = SpatialProbabilisticLayer(["rain", "temp", "wind"]).fit(data, coords)
+    cells = layer.select(bbox=(-2, 2, 103, 107))
+    layer.exceedance_probability({"rain": (">", 50)}, cells, mode="any")
 """
 
 from __future__ import annotations
 
 import importlib
 
-from . import datasets, marginals, metrics, plotting, theme
+from . import datasets, marginals, metrics, plotting, semiparametric, spatial, theme
 from .core import NeuroCopula
 from .marginals import (
     EmpiricalCopulaTransform,
     StandardizeTransform,
     pseudo_observations,
 )
+from .semiparametric import GroupedMarginalTransform, SemiParametricMarginal
+from .spatial import SpatialDependence
 
 __version__ = "0.1.0"
 
 __all__ = [
     "NeuroCopula",
+    "SpatialProbabilisticLayer",
+    "SeasonalLayers",
+    "SpatialDependence",
+    "RegionSet",
+    "SemiParametricMarginal",
+    "GroupedMarginalTransform",
     "VineCopula",
     "EmpiricalCopulaTransform",
     "StandardizeTransform",
@@ -51,8 +69,14 @@ __all__ = [
     "marginals",
     "metrics",
     "plotting",
+    "semiparametric",
+    "spatial",
     "theme",
     "benchmark",
+    "layer",
+    "seasonal",
+    "regions",
+    "io",
     "__version__",
 ]
 
@@ -67,11 +91,24 @@ def __getattr__(name: str):
     the latter re-enters this very function through the import machinery's
     fromlist handling and recurses forever.
     """
-    if name in ("VineCopula", "benchmark"):
-        module = importlib.import_module(
-            ".vine" if name == "VineCopula" else ".benchmark", __name__
-        )
-        value = getattr(module, name) if name == "VineCopula" else module
+    # (attribute name) -> (submodule, whether to return the module itself)
+    lazy = {
+        "VineCopula": (".vine", False),
+        "benchmark": (".benchmark", True),
+        # layer/io pull in torch-heavy and xarray-dependent code; keep them
+        # off the critical path of a plain `import neurocopula`.
+        "SpatialProbabilisticLayer": (".layer", False),
+        "SeasonalLayers": (".seasonal", False),
+        "RegionSet": (".regions", False),
+        "regions": (".regions", True),
+        "seasonal": (".seasonal", True),
+        "layer": (".layer", True),
+        "io": (".io", True),
+    }
+    if name in lazy:
+        modname, want_module = lazy[name]
+        module = importlib.import_module(modname, __name__)
+        value = module if want_module else getattr(module, name)
         globals()[name] = value  # cache, so this runs at most once per name
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

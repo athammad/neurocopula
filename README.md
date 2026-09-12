@@ -55,7 +55,9 @@ what the first one just did.
 ```bash
 pip install neurocopula                 # core
 pip install "neurocopula[vine]"         # + pyvinecopulib, for the comparison baseline
-pip install "neurocopula[all]"          # + notebooks, tests, linting
+pip install "neurocopula[gridded]"      # + xarray/netCDF4, for the spatial layer
+pip install "neurocopula[regions]"      # + geopandas, for polygon selection
+pip install "neurocopula[all]"          # everything, plus notebooks and dev tools
 ```
 
 Python 3.10+. The core depends on `torch`, `zuko`, `numpy`, `pandas`, `scipy`, `matplotlib`.
@@ -142,6 +144,147 @@ $q = 0.25$ but not at $q = 0.01$ will misprice exactly the events you built it f
 | What does a conditional look like? | `plot_conditional_distribution` |
 | How uncertain is it? | `plot_uncertainty` |
 | How do the models compare? | `plot_benchmark_bars`, `plot_model_comparison` |
+
+## Gridded data: one model, any region
+
+`NeuroCopula` models dependence between variables at a single site. For data on a
+grid there is a second dependence to account for — between locations — and ignoring
+it quietly breaks anything aggregated over an area.
+
+The arithmetic is worth seeing. Suppose an event has probability 0.01 at each of
+1,000 locations. Under independence, the chance it happens *somewhere* is
+`1 - 0.99^1000 ≈ 1`. But locations are not independent: when things go wrong in one
+place they usually go wrong next door, so events pile onto the same rows rather than
+spreading across different ones. Independence also divides the standard deviation of
+an areal mean by `√n` — a factor of ~30 here — which makes region-wide extremes
+impossible by construction.
+
+`SpatialProbabilisticLayer` fixes that by fitting two layers:
+
+```python
+from neurocopula import SpatialProbabilisticLayer
+
+layer = SpatialProbabilisticLayer(
+    variables=["a", "b", "c"],
+    marginal_specs={"a": dict(zero_inflated=True, zero_threshold=0.1, tail="gpd")},
+).fit(data, coords)          # data: (n_rows, n_locations, n_vars);  coords: (n_locations, 2)
+
+cells = layer.select(bbox=(-8, -6, 105, 115))
+layer.sample(cells, n=10_000)        # (10000, n_cells, n_vars) joint draws
+```
+
+**Layer 1** is a per-location copula: marginals, then a flow over the variables.
+**Layer 2** is a Student-t spatial process linking locations, so the joint
+distribution over *any* subset is available after fitting — the region is chosen at
+query time, not baked in. It is deliberately Student-t and not Gaussian: a Gaussian
+random field has exactly **zero tail dependence**, so locations become independent in
+the extremes however correlated they look otherwise. If joint extremes are the
+subject, that assumption answers the question before the data is consulted.
+
+Layer 2 operates on the flow's *latent* space rather than on observed values. A flow
+already maps data to independent latents, so correlating those and inverting the flow
+inherits the spatial dependence while preserving each location's own cross-variable
+copula. The other order destroys one of them.
+
+### Asking the right question
+
+These are different questions with different answers, and only the first is
+independent of spatial dependence:
+
+```python
+conditions = {"a": (">", 50), "b": (">", 35)}
+
+layer.exceedance_probability(conditions, cells, mode="pointwise")  # per location
+layer.exceedance_probability(conditions, cells, mode="mean")       # at a typical point
+layer.exceedance_probability(conditions, cells, mode="any")        # anywhere in the region
+layer.exceedance_probability(conditions, cells, mode="fraction")   # how much of it
+layer.posterior_exceedance(conditions, cells, mode="mean")         # with a credible interval
+```
+
+`sample` is the general case — it returns coherent joint draws, so any aggregation you
+can write is a valid query.
+
+### Named regions
+
+```python
+from neurocopula import RegionSet
+
+layer.attach_regions(RegionSet.natural_earth())
+cells = layer.select(region="Indonesia", max_cells=2000)
+```
+
+`RegionSet.from_file` reads any polygon file geopandas supports, so administrative
+boundaries and hydrological catchments work the same way. Identifiers need not be
+strings — HydroBASINS numbers its polygons, and integer ids are used as such.
+
+`max_cells` matters. Joint sampling factorizes an n×n matrix — O(n³) time, O(n²)
+memory:
+
+| locations | memory | 5,000 draws |
+|---|---|---|
+| 500 | 0.002 GB | 1.4 s |
+| 2,000 | 0.03 GB | 7.7 s |
+| 5,000 | 0.20 GB | 23 s |
+| 15,000 | 1.8 GB | minutes |
+
+For an *areal* statistic a random subset of the region is an unbiased estimate of the
+whole, so thinning costs accuracy that is small next to the Monte Carlo error already
+present.
+
+### Stratified fitting
+
+A copula assumes its rows are draws from **one** distribution. Pooling rows from
+different regimes estimates a mixture of them instead, and the "dependence" you get
+back is partly just the difference between the regimes.
+
+```python
+from neurocopula import SeasonalLayers
+
+layers = SeasonalLayers.fit(data, coords, dates, variables=[...],
+                            by="season", period=(1991, 2020))
+layers.exceedance_probability(conditions, cells, when="DJF", mode="any")
+layers.seasonal_cycle(conditions, cells)     # the cycle a pooled fit averages away
+```
+
+This is the stationarisation step — the job an ARMA-GARCH filter does in the classic
+vine-copula workflow — and it keeps everything in physical units, so no conversion
+wraps the queries.
+
+### Marginals with atoms and heavy tails
+
+Plenty of real variables are exactly zero much of the time and heavy-tailed the rest —
+rainfall, insurance claims, river discharge, trade volumes. A plain empirical CDF maps
+every zero to the same pseudo-observation, so they collapse onto one spike and the
+flow spends its capacity modelling a delta function.
+
+```python
+from neurocopula import SemiParametricMarginal
+
+m = SemiParametricMarginal(zero_inflated=True, zero_threshold=0.1, tail="gpd").fit(x)
+```
+
+Zeros get the randomized probability integral transform, which spreads them over the
+interval they actually occupy. The transform is therefore stochastic by design — that
+is correct for a discrete-continuous mixture, not a bug. A generalised Pareto upper
+tail lets the model extrapolate past the largest observed value, which a bare
+empirical CDF can never do.
+
+**One caveat worth knowing.** That randomization destroys exactly the co-occurrence
+information Layer 2 needs, because two neighbouring locations that are both zero on
+the same row get independent random values. On synthetic data with a known 300 km
+range, the naive estimate collapsed to 125 km and reported *no* tail dependence at
+all. The layer detects an atom and switches to estimating correlation from the
+censoring pattern by tetrachoric inversion, and degrees of freedom from the upper tail
+— recovering 289 km.
+
+### Export
+
+```python
+from neurocopula.io import save_layer
+save_layer(layer, "mylayer", precompute={"compound": conditions})
+# mylayer.nc  — grid, spatial parameters, probability fields; opens in any GIS
+# mylayer.pt  — the fitted model, for questions you did not precompute
+```
 
 ## Benchmarks
 
@@ -267,6 +410,11 @@ Runnable notebooks in [`examples/`](examples/):
 - **`vine`** — `VineCopula`, the `pyvinecopulib` baseline wearing the same API.
 - **`benchmark`** — the reproducible suite, `paired_comparison`, summaries.
 - **`plotting`** / **`theme`** — the fourteen figures and the shared visual system.
+- **`spatial`** — `SpatialDependence`: Student-t random fields, correlation estimation,
+  joint sampling over any subset of locations.
+- **`semiparametric`** — marginals with an atom and/or a generalised Pareto tail.
+- **`layer`** / **`seasonal`** / **`regions`** / **`io`** — the gridded stack: the
+  probabilistic layer, stratified fitting, polygon-based selection, NetCDF export.
 
 ## Known limitations
 

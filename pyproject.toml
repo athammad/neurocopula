@@ -42,6 +42,8 @@ dependencies = [
 
 [project.optional-dependencies]
 vine = ["pyvinecopulib>=0.6"]
+regions = ["geopandas>=0.14", "shapely>=2.0"]
+gridded = ["xarray>=2023.1", "netCDF4>=1.6"]
 notebooks = ["jupyter>=1.0", "nbformat>=5.9", "ipykernel>=6.25"]
 dev = [
     "pytest>=7.4",
@@ -51,8 +53,11 @@ dev = [
     "nbformat>=5.9",
     "ipykernel>=6.25",
     "pyvinecopulib>=0.6",
+    "geopandas>=0.14",
+    "xarray>=2023.1",
+    "netCDF4>=1.6",
 ]
-all = ["neurocopula[vine,notebooks,dev]"]
+all = ["neurocopula[vine,regions,gridded,notebooks,dev]"]
 
 [project.urls]
 Homepage = "https://github.com/athammad/neurocopula"
@@ -72,6 +77,7 @@ addopts = "-q --strict-markers"
 markers = [
     "slow: tests that fit models and take tens of seconds (deselect with '-m \"not slow\"')",
     "vine: tests that require the optional pyvinecopulib dependency",
+    "network: tests that download data (deselect with -m \"not network\")",
 ]
 filterwarnings = ["ignore::DeprecationWarning"]
 

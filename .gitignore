@@ -28,3 +28,18 @@ legacy/
 
 # pyenv local environment name: machine-specific.
 .python-version
+
+
+CLAUDE.md
+tex_example.pdf
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# Application work, kept out of the library repository entirely.
+SEA_flow/
+tex_example.pdf
